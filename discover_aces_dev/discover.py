@@ -8,8 +8,19 @@ from collections import defaultdict
 from discover_aces_dev.common import paths_common_ancestor, vivified_to_dict
 
 __all__ = [
-    'REFERENCE_IMPLEMENTATION_TRANSFORMS_ROOT', 'discover_aces_ctl',
-    'ACES_CTL_TRANSFORM_ROOT_CATEGORIES', 'classify_aces_ctl_transforms'
+    'ACES_URN', 'ACES_TYPES', 'ACES_CTL_TRANSFORM_ROOT_CATEGORIES',
+    'EXCLUDED_CLASSIFIERS', 'REFERENCE_IMPLEMENTATION_TRANSFORMS_ROOT',
+    'CTLTransform', 'CTLTransformPair', 'find_transform_pairs',
+    'discover_aces_ctl', 'classify_aces_ctl_transforms'
+]
+
+ACES_ID_SEPARATOR = '.'
+ACES_URN_SEPARATOR = ':'
+ACES_URN = 'urn:ampas:aces:transformId:v1.5'
+ACES_NAMESPACE = 'Academy'
+ACES_TYPES = [
+    'IDT', 'LMT', 'ODT', 'RRT', 'RRTODT', 'InvRRT', 'InvODT', 'InvRRTODT',
+    'ACESlib', 'ACEScsc', 'ACESutil'
 ]
 
 ACES_CTL_TRANSFORM_ROOT_CATEGORIES = {
@@ -32,21 +43,61 @@ REFERENCE_IMPLEMENTATION_TRANSFORMS_ROOT = os.environ.get(
         'transforms'))
 
 
+def patch_invalid_id(id_):
+    if not id_.startswith(ACES_URN):
+        logging.warning(f'{id_} is missing "ACES" URN!')
+
+        id_ = f'{ACES_URN}:{id_}'
+
+    if id_.endswith('a1.v1'):
+        logging.warning(f'{id_} version scheme is invalid!')
+
+        id_ = id_.replace('a1.v1', 'a1.1.0')
+
+    if id_.endswith('a1.v2'):
+        logging.warning(f'{id_} version scheme is invalid!')
+
+        id_ = id_.replace('a1.v2', 'a1.2.0')
+
+    if 'Academy.P3D65_108nits_7.2nits_ST2084' in id_:
+        logging.warning(f'Patching {id_}!')
+
+        return id_.replace('7.2', '7')
+    elif 'ACEScsc' in id_ and not 'ACEScsc.Academy' in id_:
+        logging.warning(f'Patching {id_}!')
+
+        return id_.replace('ACEScsc', 'ACEScsc.Academy')
+    elif 'ACESlib' in id_ and not 'ACESlib.Academy' in id_:
+        logging.warning(f'Patching {id_}!')
+
+        return id_.replace('ACESlib', 'ACESlib.Academy')
+    elif 'ACESutil' in id_ and not 'ACESutil.Academy' in id_:
+        logging.warning(f'Patching {id_}!')
+
+        return id_.replace('ACESutil', 'ACESutil.Academy')
+    else:
+        return id_
+
+
 class CTLTransform:
-    def __init__(self, name, path):
-        self._name = name
+    def __init__(self, path):
         self._path = path
 
         self._code = None
         self._id = None
+        self._urn = None
+        self._type = None
+        self._namespace = None
+        self._name = None
+        self._major_version_number = None
+        self._minor_version_number = None
+        self._patch_version_number = None
         self._user_name = None
         self._description = ''
+        self._source = None
+        self._target = None
 
         self._parse()
-
-    @property
-    def name(self):
-        return self._name
 
     @property
     def path(self):
@@ -61,6 +112,34 @@ class CTLTransform:
         return self._id
 
     @property
+    def urn(self):
+        return self._urn
+
+    @property
+    def type(self):
+        return self._type
+
+    @property
+    def namespace(self):
+        return self._namespace
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def major_version_number(self):
+        return self._major_version_number
+
+    @property
+    def minor_version_number(self):
+        return self._minor_version_number
+
+    @property
+    def patch_version_number(self):
+        return self._patch_version_number
+
+    @property
     def user_name(self):
         return self._user_name
 
@@ -68,12 +147,61 @@ class CTLTransform:
     def description(self):
         return self._description
 
+    @property
+    def source(self):
+        return self._source
+
+    @property
+    def target(self):
+        return self._target
+
     def __str__(self):
         return f'{self.__class__.__name__}({self._name})'
 
     def __repr__(self):
         return (f"{self.__class__.__name__}("
                 f"'{self._name}', '{os.path.basename(self._path)}')")
+
+    def _parse_id(self):
+        if self._id is None:
+            return
+
+        id_ = patch_invalid_id(self._id)
+
+        self._urn, components = id_.rsplit(ACES_URN_SEPARATOR, 1)
+        components = components.split(ACES_ID_SEPARATOR)
+
+        assert self._urn == ACES_URN, (
+            f'{self._path} URN {self._urn} is invalid!')
+
+        assert len(components) in (4, 6), (
+            f'{self._path} transform has an invalid id!')
+
+        if len(components) == 4:
+            (self._type, self._major_version_number,
+             self._minor_version_number,
+             self._patch_version_number) = components
+        else:
+            (self._type, self._namespace, self._name,
+             self._major_version_number, self._minor_version_number,
+             self._patch_version_number) = components
+
+        assert self._type in ACES_TYPES, (
+            f'{self._path} type {self._type} is invalid!')
+
+        if self._name is not None:
+            if '_to_' in self._name:
+                self._source, self._target = self._name.split('_to_')
+            elif self._type in ('IDT', 'LMT'):
+                self._source, self._target = self._name, 'ACES2065-1'
+            elif self._type == 'ODT':
+                self._source, self._target = 'OCES', self._name
+            elif self._type == 'InvODT':
+                self._source, self._target = self._name, 'OCES'
+            elif self._type == 'RRTODT':
+                self._source, self._target = 'ACES2065-1', self._name
+            elif self._type == 'InvRRTODT':
+                self._source, self._target = self._name, 'ACES2065-1'
 
     def _parse(self):
         with open(self._path) as ctl_file:
@@ -88,6 +216,7 @@ class CTLTransform:
                                    line)
                 if search:
                     self._id = search.group(1)
+                    self._parse_id()
                     continue
 
                 search = re.search('<ACESuserName>(.*)</ACESuserName>', line)
@@ -106,14 +235,9 @@ class CTLTransform:
 
 
 class CTLTransformPair:
-    def __init__(self, name, forward_transform, inverse_transform):
-        self._name = name
+    def __init__(self, forward_transform, inverse_transform):
         self._forward_transform = forward_transform
         self._inverse_transform = inverse_transform
-
-    @property
-    def name(self):
-        return self._name
 
     @property
     def forward_transform(self):
@@ -124,7 +248,7 @@ class CTLTransformPair:
         return self._inverse_transform
 
     def __str__(self):
-        return f'{self.__class__.__name__}({self._name})'
+        return f'{self.__class__.__name__}({self._forward_transform.name}, {self._inverse_transform.name})'
 
     def __repr__(self):
         return (f"{self.__class__.__name__}("
@@ -138,10 +262,13 @@ def find_transform_pairs(ctl_transforms):
     ctl_transform_pairs = defaultdict(dict)
     for ctl_transform in ctl_transforms:
         is_forward = True
+
         basename = os.path.splitext(os.path.basename(ctl_transform))[0]
+
         if basename.startswith('Inv'):
             basename = basename.replace('Inv', '')
             is_forward = False
+
         if '_to_ACES' in basename:
             basename = basename.replace('_to_ACES', '')
             is_forward = False
@@ -197,7 +324,7 @@ def classify_aces_ctl_transforms(unclassified_ctl_transforms):
 
         for basename, pairs in find_transform_pairs(ctl_transforms).items():
             if len(pairs) == 1:
-                ctl_transform = CTLTransform(basename, list(pairs.values())[0])
+                ctl_transform = CTLTransform(list(pairs.values())[0])
 
                 logging.info(
                     f'Classifying "{ctl_transform}" under "{classifiers}".')
@@ -207,12 +334,12 @@ def classify_aces_ctl_transforms(unclassified_ctl_transforms):
 
             elif len(pairs) == 2:
                 forward_ctl_transform = CTLTransform(
-                    basename, pairs['forward_transform'])
+                    pairs['forward_transform'])
                 inverse_ctl_transform = CTLTransform(
-                    basename, pairs['inverse_transform'])
+                    pairs['inverse_transform'])
 
-                ctl_transform = CTLTransformPair(
-                    basename, forward_ctl_transform, inverse_ctl_transform)
+                ctl_transform = CTLTransformPair(forward_ctl_transform,
+                                                 inverse_ctl_transform)
 
                 logging.info(
                     f'Classifying "{ctl_transform}" under "{classifiers}".')
@@ -239,7 +366,10 @@ if __name__ == '__main__':
             for name, ctl_transform in ctl_transforms.items():
                 print(f'[ {name} ]')
                 if isinstance(ctl_transform, CTLTransform):
-                    print(f'\t{ctl_transform.id}')
+                    print(f'\t"{ctl_transform.source}" to '
+                          f'"{ctl_transform.target}"')
                 elif isinstance(ctl_transform, CTLTransformPair):
-                    print(f'\t{ctl_transform.forward_transform.id}')
-                    print(f'\t{ctl_transform.inverse_transform.id}')
+                    print(f'\t"{ctl_transform.forward_transform.source}" to '
+                          f'"{ctl_transform.forward_transform.target}"')
+                    print(f'\t"{ctl_transform.inverse_transform.source}" to '
+                          f'"{ctl_transform.inverse_transform.target}"')
