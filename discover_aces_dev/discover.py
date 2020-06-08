@@ -44,39 +44,28 @@ REFERENCE_IMPLEMENTATION_TRANSFORMS_ROOT = os.environ.get(
 
 
 def patch_invalid_id(id_):
+    invalid_id = id_
     if not id_.startswith(ACES_URN):
-        logging.warning(f'{id_} is missing "ACES" URN!')
+        logging.warning(f'{invalid_id} is missing "ACES" URN!')
 
         id_ = f'{ACES_URN}:{id_}'
 
-    if id_.endswith('a1.v1'):
-        logging.warning(f'{id_} version scheme is invalid!')
-
-        id_ = id_.replace('a1.v1', 'a1.1.0')
-
-    if id_.endswith('a1.v2'):
-        logging.warning(f'{id_} version scheme is invalid!')
-
-        id_ = id_.replace('a1.v2', 'a1.2.0')
-
     if 'Academy.P3D65_108nits_7.2nits_ST2084' in id_:
-        logging.warning(f'Patching {id_}!')
+        logging.warning(f'{invalid_id} has an invalid separator in "7.2nits"!')
 
-        return id_.replace('7.2', '7')
-    elif 'ACEScsc' in id_ and not 'ACEScsc.Academy' in id_:
-        logging.warning(f'Patching {id_}!')
+        id_ = id_.replace('7.2', '7')
+    elif 'ACEScsc' in id_:
+        if not 'ACEScsc.Academy' in id_:
+            logging.warning(f'{invalid_id} is missing "Academy" namespace!')
 
-        return id_.replace('ACEScsc', 'ACEScsc.Academy')
-    elif 'ACESlib' in id_ and not 'ACESlib.Academy' in id_:
-        logging.warning(f'Patching {id_}!')
+            id_ = id_.replace('ACEScsc', 'ACEScsc.Academy')
 
-        return id_.replace('ACESlib', 'ACESlib.Academy')
-    elif 'ACESutil' in id_ and not 'ACESutil.Academy' in id_:
-        logging.warning(f'Patching {id_}!')
+        if id_.endswith('a1.v1'):
+            logging.warning(f'{invalid_id} version scheme is invalid!')
 
-        return id_.replace('ACESutil', 'ACESutil.Academy')
-    else:
-        return id_
+            id_ = id_.replace('a1.v1', 'a1.1.0')
+
+    return id_
 
 
 class CTLTransform:
@@ -170,20 +159,28 @@ class CTLTransform:
 
         self._urn, components = id_.rsplit(ACES_URN_SEPARATOR, 1)
         components = components.split(ACES_ID_SEPARATOR)
+        self._type, components = components[0], components[1:]
 
         assert self._urn == ACES_URN, (
             f'{self._path} URN {self._urn} is invalid!')
 
-        assert len(components) in (4, 6), (
+        assert len(components) in (3, 4, 5), (
             f'{self._path} transform has an invalid id!')
 
-        if len(components) == 4:
-            (self._type, self._major_version_number,
-             self._minor_version_number,
+        if len(components) == 3:
+            (self._major_version_number, self._minor_version_number,
              self._patch_version_number) = components
+        elif len(components) == 4:
+            if self._type in ('ACESlib', 'ACESutil'):
+                (self._name, self._major_version_number,
+                 self._minor_version_number,
+                 self._patch_version_number) = components
+            elif self._type == 'IDT':
+                (self._name, self._namespace, self._major_version_number,
+                 self._minor_version_number) = components
         else:
-            (self._type, self._namespace, self._name,
-             self._major_version_number, self._minor_version_number,
+            (self._namespace, self._name, self._major_version_number,
+             self._minor_version_number,
              self._patch_version_number) = components
 
         assert self._type in ACES_TYPES, (
@@ -202,6 +199,11 @@ class CTLTransform:
                 self._source, self._target = 'ACES2065-1', self._name
             elif self._type == 'InvRRTODT':
                 self._source, self._target = self._name, 'ACES2065-1'
+        else:
+            if self._type == 'RRT':
+                self._source, self._target = 'ACES2065-1', 'OCES'
+            elif self._type == 'InvRRT':
+                self._source, self._target = 'OCES', 'ACES2065-1'
 
     def _parse(self):
         with open(self._path) as ctl_file:
