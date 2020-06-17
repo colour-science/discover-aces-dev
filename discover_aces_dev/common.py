@@ -3,7 +3,10 @@
 import os
 from collections import defaultdict
 
-__all__ = ['first_item', 'common_ancestor', 'paths_common_ancestor']
+__all__ = [
+    'first_item', 'common_ancestor', 'paths_common_ancestor', 'vivification',
+    'vivified_to_dict', 'is_networkx_installed'
+]
 
 
 def first_item(iterable, default=None):
@@ -76,3 +79,35 @@ def vivified_to_dict(vivified):
             for key, value in vivified.items()
         }
     return vivified
+
+
+def is_networkx_installed(raise_exception=False):
+    """
+    Returns if *NetworkX* is installed and available.
+
+    Parameters
+    ----------
+    raise_exception : bool
+        Raise exception if *NetworkX* is unavailable.
+
+    Returns
+    -------
+    bool
+        Is *NetworkX* installed.
+
+    Raises
+    ------
+    ImportError
+        If *NetworkX* is not installed.
+    """
+
+    try:  # pragma: no cover
+        import networkx  # noqa
+
+        return True
+    except ImportError as error:  # pragma: no cover
+        if raise_exception:
+            raise ImportError(
+                '"NetworkX" related API features are not available: "{0}".'.
+                format(error))
+        return False

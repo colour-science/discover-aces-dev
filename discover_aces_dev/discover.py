@@ -176,7 +176,7 @@ class CTLTransform:
                  self._minor_version_number,
                  self._patch_version_number) = components
             elif self._type == 'IDT':
-                (self._name, self._namespace, self._major_version_number,
+                (self._namespace, self._name, self._major_version_number,
                  self._minor_version_number) = components
         else:
             (self._namespace, self._name, self._major_version_number,
@@ -187,8 +187,16 @@ class CTLTransform:
             f'{self._path} type {self._type} is invalid!')
 
         if self._name is not None:
-            if '_to_' in self._name:
-                self._source, self._target = self._name.split('_to_')
+            if self._type == 'ACEScsc':
+                source, target = self._name.split('_to_')
+
+                if source == 'ACES':
+                    source = 'ACES2065-1'
+
+                if target == 'ACES':
+                    target = 'ACES2065-1'
+
+                self._source, self._target = source, target
             elif self._type in ('IDT', 'LMT'):
                 self._source, self._target = self._name, 'ACES2065-1'
             elif self._type == 'ODT':
@@ -250,7 +258,9 @@ class CTLTransformPair:
         return self._inverse_transform
 
     def __str__(self):
-        return f'{self.__class__.__name__}({self._forward_transform.name}, {self._inverse_transform.name})'
+        return (
+            f'{self.__class__.__name__}('
+            f'{self._forward_transform.name}, {self._inverse_transform.name})')
 
     def __repr__(self):
         return (f"{self.__class__.__name__}("
@@ -266,12 +276,11 @@ def find_transform_pairs(ctl_transforms):
         is_forward = True
 
         basename = os.path.splitext(os.path.basename(ctl_transform))[0]
-
         if basename.startswith('Inv'):
             basename = basename.replace('Inv', '')
             is_forward = False
 
-        if '_to_ACES' in basename:
+        if re.search('.*_to_ACES$', basename):
             basename = basename.replace('_to_ACES', '')
             is_forward = False
 
@@ -285,8 +294,11 @@ def find_transform_pairs(ctl_transforms):
     return ctl_transform_pairs
 
 
-def discover_aces_ctl(root_directory=REFERENCE_IMPLEMENTATION_TRANSFORMS_ROOT):
+def discover_aces_ctl(root_directory=REFERENCE_IMPLEMENTATION_TRANSFORMS_ROOT,
+                      filterers=None):
     root_directory = os.path.normpath(os.path.expandvars(root_directory))
+    if filterers is None:
+        filterers = []
 
     ctl_transforms = defaultdict(list)
     for directory, _sub_directories, filenames in os.walk(root_directory):
@@ -295,6 +307,15 @@ def discover_aces_ctl(root_directory=REFERENCE_IMPLEMENTATION_TRANSFORMS_ROOT):
 
         for filename in filenames:
             if not filename.lower().endswith('ctl'):
+                continue
+
+            excluded = False
+            for filterer in filterers:
+                if not filterer(filename):
+                    excluded = True
+                    break
+
+            if excluded:
                 continue
 
             ctl_transform = os.path.join(directory, filename)
@@ -363,10 +384,12 @@ if __name__ == '__main__':
         discover_aces_ctl())
 
     pprint(classified_ctl_transforms)
+
     for category, classifiers in classified_ctl_transforms.items():
+        print(f'[ {category} ]')
         for classifier, ctl_transforms in classifiers.items():
             for name, ctl_transform in ctl_transforms.items():
-                print(f'[ {name} ]')
+                print(f'( {name} )')
                 if isinstance(ctl_transform, CTLTransform):
                     print(f'\t"{ctl_transform.source}" to '
                           f'"{ctl_transform.target}"')
